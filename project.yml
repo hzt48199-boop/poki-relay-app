@@ -25,6 +25,8 @@ targets:
       path: Sources/Info.plist
       properties:
         CFBundleDisplayName: PokiRelay
+        CFBundleShortVersionString: "1.1"
+        CFBundleVersion: "2"
         NSLocalNetworkUsageDescription: "Advertises the pairing host on your local network and relays the pairing connection."
         NSBonjourServices:
           - _remotepairing-pairable-host._tcp
