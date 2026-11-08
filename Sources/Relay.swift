@@ -15,6 +15,9 @@ final class RelayManager: ObservableObject {
     private let queue = DispatchQueue(label: "com.naiwa.pokirelay.network")
     private var listener: NWListener?
     private var relays: [ObjectIdentifier: ConnectionRelay] = [:]
+    private var shouldRun = false
+    private var activeTag = ""
+    private var restartCount = 0
 
     // MARK: - Logging
 
@@ -35,14 +38,24 @@ final class RelayManager: ObservableObject {
     // MARK: - Start / Stop
 
     func start(authtag: String) {
-        guard listener == nil else {
+        guard !shouldRun else {
             log("Already running")
             return
         }
+        shouldRun = true
+        activeTag = authtag
+        restartCount = 0
+        KeepAlive.shared.start { [weak self] message in self?.log(message) }
+        createListener()
+        DispatchQueue.main.async { self.isRunning = true }
+        log("Started. authTag=\(authtag.isEmpty ? "<empty>" : authtag)")
+    }
+
+    private func createListener() {
         let txtRecord = NWTXTRecord([
             "name": "NaiwaBox",
             "identifier": Self.identifier,
-            "authTag": authtag,
+            "authTag": activeTag,
             "model": "Mac17,7",
             "flags": "1",
             "ver": "26",
@@ -65,7 +78,16 @@ final class RelayManager: ObservableObject {
                     self.log("Listener waiting: \(error)")
                 case .failed(let error):
                     self.log("Listener failed: \(error)")
-                    self.stop()
+                    self.listener?.cancel()
+                    self.listener = nil
+                    if self.shouldRun {
+                        self.restartCount += 1
+                        self.log("Auto-restart #\(self.restartCount) in 2s")
+                        self.queue.asyncAfter(deadline: .now() + 2) { [weak self] in
+                            guard let self, self.shouldRun, self.listener == nil else { return }
+                            self.createListener()
+                        }
+                    }
                 case .cancelled:
                     self.log("Listener cancelled")
                 default:
@@ -77,14 +99,14 @@ final class RelayManager: ObservableObject {
             }
             listener.start(queue: queue)
             self.listener = listener
-            DispatchQueue.main.async { self.isRunning = true }
-            log("Started. authTag=\(authtag.isEmpty ? "<empty>" : authtag)")
         } catch {
             log("Failed to create listener: \(error)")
         }
     }
 
     func stop() {
+        shouldRun = false
+        KeepAlive.shared.stop { [weak self] message in self?.log(message) }
         queue.async { [weak self] in
             guard let self else { return }
             let current = Array(self.relays.values)
